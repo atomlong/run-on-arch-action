@@ -1,4 +1,4 @@
-name: 'Run on Architecture'
+name: 'Run on Archlinuxarm'
 branding:
   icon: 'cpu'
   color: 'green'
