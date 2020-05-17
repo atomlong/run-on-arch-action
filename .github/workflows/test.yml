@@ -10,10 +10,10 @@ jobs:
       uses: uraimo/run-on-arch-action@master
       with:
         architecture: aarch64
-        distribution: ubuntu18.04
+        distribution: archlinuxarm
         run: |
-          apt update
-          apt install -y build-essential
+          sudo pacman -Syu --noconfirm
+          sudo pacman -S base-devel --noconfirm
           uname -a > output.txt
           echo | gcc -v -E - 2>&1 | grep cc1 >> output.txt
           lscpu | grep "Model name:" | sed -r 's/Model name:\s{1,}//g' >> output.txt
