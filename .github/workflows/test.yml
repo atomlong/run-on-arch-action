@@ -7,7 +7,7 @@ jobs:
     steps:
     - name: Run some commands on arm64
       id: runcmd
-      uses: uraimo/run-on-arch-action@master
+      uses: DuckVador/run-on-arch-action@master
       with:
         architecture: aarch64
         distribution: archlinuxarm
