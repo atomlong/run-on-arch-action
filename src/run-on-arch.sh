@@ -91,6 +91,7 @@ run_container () {
   done
 
   chmod +x "${ACTION_DIR}/src/run-on-arch-commands.sh"
+  chmod +x "${ACTION_DIR}/src/ci-build.sh"
 
   # The location of the event.json file
   EVENT_DIR=$(dirname "$GITHUB_EVENT_PATH")

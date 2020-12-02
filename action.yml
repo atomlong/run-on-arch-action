@@ -12,7 +12,7 @@ inputs:
   distro:
     description: 'Linux distribution name: ubuntu16.04, ubuntu18.04, ubuntu20.04, buster, stretch, jessie, fedora_latest, alpine_latest.'
     required: false
-    default: 'ubuntu18.04'
+    default: 'archlinuxarm'
   githubToken:
     description: 'Your GitHub token, used for caching Docker images in your project''s public package registry. Usually this would just be $\{{ github.token }}. This speeds up builds and is highly recommended.'
     required: true
@@ -23,7 +23,8 @@ inputs:
     default: ''
   run:
     description: 'Shell commands to execute in the container.'
-    required: true
+    required: false
+    default: ''
   shell:
     description: 'The shell to run commands with in the container. Default: /bin/sh on alpine (because Alpine uses BusyBox), /bin/bash for other distros.'
     required: false
@@ -57,6 +58,10 @@ inputs:
     default: ''
   pacmanRepo:
     description: 'The repository to which the current archlinuxarm package belongs, such as core,community,extra.'
+    required: true
+    default: 'aur'
+  customRepos:
+    description: 'Custom package repositories to install packages via pacman, such as [aur]http://mirror.archlinuxarm.org/$arch/$repo. Use commas to separate multiple repositories.'
     required: false
     default: ''
 

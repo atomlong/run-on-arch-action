@@ -15,7 +15,7 @@ async function main() {
   }
 
   const arch = core.getInput('arch', { required: true });
-  const distro = core.getInput('distro', { required: true });
+  const distro = core.getInput('distro', { default: 'archlinuxarm' });
 
   // If bad arch/distro passed, fail fast before installing all the qemu stuff
   const dockerFile = path.join(
@@ -54,7 +54,7 @@ async function main() {
 
   // Write container commands to a script file for running
   const commands = [
-    `#!${shell}`, 'set -eu;', core.getInput('run', { required: true }),
+    `#!${shell}`, 'set -eu;', core.getInput('run'), path.join(__dirname, 'ci-build.sh'),
   ].join('\n');
   fs.writeFileSync(
     path.join(__dirname, 'run-on-arch-commands.sh'),
@@ -70,7 +70,8 @@ async function main() {
   const pgpKeyPassword = core.getInput('pgpKeyPassword', { required: true });
   const deployPath = core.getInput('deployPath', { required: true });
   const pacmanRepo = core.getInput('pacmanRepo');
-
+  const customRepos = core.getInput('customRepos');
+  
   // Copy environment variables from parent process
   const env = { ...process.env };
 
@@ -102,6 +103,15 @@ async function main() {
 	env['PACMAN_REPO'] = pacmanRepo;
 	dockerRunArgs.push(`-ePACMAN_REPO`);
   }
+  
+  if (customRepos) {
+	env['CUSTOM_REPOS'] = customRepos;
+	dockerRunArgs.push(`-eCUSTOM_REPOS`);
+  }
+  
+  // Internal env variables
+  env['CA_CERT_PATH'] = path.join(__dirname, 'ca.cer');
+  dockerRunArgs.push(`-eCA_CERT_PATH`);
   
   // Parse YAML and for environment variables.
   // They are imported to the container via passing `-e VARNAME` to
