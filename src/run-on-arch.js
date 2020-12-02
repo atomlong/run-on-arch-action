@@ -65,6 +65,11 @@ async function main() {
   const dockerRunArgs = shlex.split(core.getInput('dockerRunArgs'));
 
   const githubToken = core.getInput('githubToken');
+  const rcloneConfig = core.getInput('rcloneConfig', { required: true });
+  const pgpKey = core.getInput('pgpKey', { required: true });
+  const pgpKeyPassword = core.getInput('pgpKeyPassword', { required: true });
+  const deployPath = core.getInput('deployPath', { required: true });
+  const pacmanRepo = core.getInput('pacmanRepo');
 
   // Copy environment variables from parent process
   const env = { ...process.env };
@@ -72,7 +77,32 @@ async function main() {
   if (githubToken) {
     env.GITHUB_TOKEN = githubToken;
   }
-
+  
+  if (rcloneConfig) {
+	env['RCLONE_CONF'] = rcloneConfig;
+	dockerRunArgs.push(`-eRCLONE_CONF`);
+  }
+  
+  if (pgpKey) {
+	env['PGP_KEY'] = pgpKey;
+	dockerRunArgs.push(`-ePGP_KEY`);
+  }
+  
+  if (pgpKeyPassword) {
+	env['PGP_KEY_PASSWD'] = pgpKeyPassword;
+	dockerRunArgs.push(`-ePGP_KEY_PASSWD`);
+  }
+  
+  if (deployPath) {
+	env['DEPLOY_PATH'] = deployPath;
+	dockerRunArgs.push(`-eDEPLOY_PATH`);
+  }
+  
+  if (pacmanRepo) {
+	env['PACMAN_REPO'] = pacmanRepo;
+	dockerRunArgs.push(`-ePACMAN_REPO`);
+  }
+  
   // Parse YAML and for environment variables.
   // They are imported to the container via passing `-e VARNAME` to
   // docker run.

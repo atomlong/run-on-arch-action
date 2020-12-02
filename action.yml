@@ -39,6 +39,26 @@ inputs:
     description: 'Shell commands to execute in the container as part of docker build, such as installing dependencies. This speeds up subsequent builds if githubToken is also used, but note that the image layer will be publicly available in your projects GitHub Package Registry, so make sure the resulting image does not have any secrets cached in logs or state.'
     required: false
     default: ''
+  rcloneConfig:
+    description: 'The content rclone config file.'
+    required: true
+    default: ''
+  pgpKey:
+    description: 'PGP private key used to Sign alarm package.'
+    required: true
+    default: ''
+  pgpKeyPassword:
+    description: 'The password of PGP private key.'
+    required: true
+    default: ''
+  deployPath:
+    description: 'The path to deploy archlinuxarm package. such as onedrive:mirrors/archlinuxarm/aarch64/core'
+    required: true
+    default: ''
+  pacmanRepo:
+    description: 'The repository to which the current archlinuxarm package belongs, such as core,community,extra.'
+    required: false
+    default: ''
 
 runs:
   using: 'node12'
