@@ -49,7 +49,7 @@ add_ca_certificates()
 {
 [ -n "${CA_CERT_PATH}" ] || { echo "You must set CA_CERT_PATH firstly."; return 1; }
 local CA_INST_PATH=/etc/ssl/certs/ca-certificates.crt
-pacman -Q awk &>/dev/null || pacman -Sy --needed --noconfirm awk
+pacman -Q awk &>/dev/null || pacman -Sy --needed --noconfirm --disable-download-timeout awk
 INSTALLED=$(awk 'FNR == NR {a[$0]; next} $0 in a {delete a[$0]} END {if (length(a) == 0) {print "true"} else {print "false"}}' ${CA_CERT_PATH} ${CA_INST_PATH})
 [ ${INSTALLED} == "true" ] && echo "CA CERTIFICATE Exist." || (
 echo "Installing CA cert of Let's Encrypt to System......"
@@ -71,7 +71,7 @@ name=$(sed -n -r 's/\[(\w+)\].*/\1/p' <<< ${repo})
 cp -vf /etc/pacman.conf{,.orig}
 sed -r 's/]/&\nServer = /' <<< ${repo} >> /etc/pacman.conf
 sed -i -r 's/^(SigLevel\s*=\s*).*/\1Never/' /etc/pacman.conf
-pacman --sync --refresh --needed --noconfirm ${name}-keyring && name="" || name="SigLevel = Never\n"
+pacman --sync --refresh --needed --noconfirm --disable-download-timeout ${name}-keyring && name="" || name="SigLevel = Never\n"
 mv -vf /etc/pacman.conf{.orig,}
 sed -r "s/]/&\n${name}Server = /" <<< ${repo} >> /etc/pacman.conf
 done
@@ -124,8 +124,8 @@ build_package()
 {
 [ -n "${ARTIFACTS_PATH}" ] || { echo "You must set ARTIFACTS_PATH firstly."; return 1; } 
 (source PKGBUILD
-[ -n "${makedepends}" ] && pacman -S --needed --noconfirm ${makedepends[@]}
-[ -n "${depends}" ] && pacman -S --needed --noconfirm ${depends[@]}
+[ -n "${makedepends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]}
+[ -n "${depends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${depends[@]}
 )
 runuser -u alarm -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --rmdeps --cleanbuild
 
@@ -169,7 +169,7 @@ message 'Install build environment.'
 [ -z "${PGP_KEY}" ] && { echo "Environment variable 'PGP_KEY' is required."; exit 1; }
 [ -z "${CA_CERT_PATH}" ] || add_ca_certificates
 [ -z "${CUSTOM_REPOS}" ] || add_custom_repos
-pacman --sync --refresh --sysupgrade --needed --noconfirm base-devel rclone expect
+pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone expect
 grep -Pq "^alarm:" /etc/group || groupadd "alarm"
 grep -Pq "^alarm:" /etc/passwd || useradd -m "alarm" -s "/bin/bash" -g "alarm"
 chown -R alarm:alarm ${GITHUB_WORKSPACE}
