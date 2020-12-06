@@ -44,21 +44,6 @@ failure() { local status="${1}"; local items=("${@:2}"); _status failure "${stat
 success() { local status="${1}"; local items=("${@:2}"); _status success "${status}." "${items[@]}"; return 0; }
 message() { local status="${1}"; local items=("${@:2}"); _status message "${status}"  "${items[@]}"; }
 
-# Add CA certificates to system
-add_ca_certificates()
-{
-[ -n "${CA_CERT_PATH}" ] || { echo "You must set CA_CERT_PATH firstly."; return 1; }
-local CA_INST_PATH=/etc/ssl/certs/ca-certificates.crt
-pacman -Q awk &>/dev/null || pacman -Sy --needed --noconfirm --disable-download-timeout awk
-INSTALLED=$(awk 'FNR == NR {a[$0]; next} $0 in a {delete a[$0]} END {if (length(a) == 0) {print "true"} else {print "false"}}' ${CA_CERT_PATH} ${CA_INST_PATH})
-[ ${INSTALLED} == "true" ] && echo "CA CERTIFICATE Exist." || (
-echo "Installing CA cert of Let's Encrypt to System......"
-printf "\n# Let's Encrypt Authority X3\n" >> ${CA_INST_PATH}
-cat ${CA_CERT_PATH} | sed -e '/^$/d' >> ${CA_INST_PATH}
-echo "Done."
-)
-}
-
 # Add custom repositories to pacman
 add_custom_repos()
 {
@@ -167,7 +152,6 @@ message 'Install build environment.'
 [ -z "${RCLONE_CONF}" ] && { echo "Environment variable 'RCLONE_CONF' is required."; exit 1; }
 [ -z "${PGP_KEY_PASSWD}" ] && { echo "Environment variable 'PGP_KEY_PASSWD' is required."; exit 1; }
 [ -z "${PGP_KEY}" ] && { echo "Environment variable 'PGP_KEY' is required."; exit 1; }
-[ -z "${CA_CERT_PATH}" ] || add_ca_certificates
 [ -z "${CUSTOM_REPOS}" ] || add_custom_repos
 pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone expect
 grep -Pq "^alarm:" /etc/group || groupadd "alarm"

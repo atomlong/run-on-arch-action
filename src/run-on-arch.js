@@ -109,10 +109,6 @@ async function main() {
 	dockerRunArgs.push(`-eCUSTOM_REPOS`);
   }
   
-  // Internal env variables
-  env['CA_CERT_PATH'] = path.join(__dirname, 'ca.cer');
-  dockerRunArgs.push(`-eCA_CERT_PATH`);
-  
   // Parse YAML and for environment variables.
   // They are imported to the container via passing `-e VARNAME` to
   // docker run.
