@@ -109,6 +109,22 @@ async function main() {
 	dockerRunArgs.push(`-eCUSTOM_REPOS`);
   }
   
+  // default variables
+  env['CI_REPO'] = env.GITHUB_REPOSITORY;
+  dockerRunArgs.push(`-eCI_REPO`);
+  
+  env['CI_BUILD_DIR'] = env.GITHUB_WORKSPACE;
+  dockerRunArgs.push(`-eCI_BUILD_DIR`);
+  
+  env['CI_COMMIT'] = env.GITHUB_SHA;
+  dockerRunArgs.push(`-eCI_COMMIT`);
+  
+  env['CI_BRANCH'] = env.GITHUB_REF.replace('refs\/heads\/', '');
+  dockerRunArgs.push(`-eCI_BRANCH`);
+  
+  env['CI_BUILD_NUMBER'] = env.GITHUB_RUN_NUMBER;
+  dockerRunArgs.push(`-eCI_BUILD_NUMBER`);
+
   // Parse YAML and for environment variables.
   // They are imported to the container via passing `-e VARNAME` to
   // docker run.
