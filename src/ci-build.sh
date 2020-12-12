@@ -25,6 +25,18 @@ _status() {
     printf "${items:+\t%s\n}" "${items:+${items[@]}}"
 }
 
+# Get package information
+_package_info() {
+    local properties=("${@}")
+    for property in "${properties[@]}"; do
+        local -n nameref_property="${property}"
+        nameref_property=($(
+            source PKGBUILD
+            declare -n nameref_property="${property}"
+            echo "${nameref_property[@]}"))
+    done
+}
+
 # Run command with status
 execute(){
     local status="${1}"
@@ -85,6 +97,7 @@ _EOF
 done
 popd
 }
+return 0
 }
 
 # Import pgp private key
@@ -107,11 +120,15 @@ _EOF
 # Build package
 build_package()
 {
-[ -n "${ARTIFACTS_PATH}" ] || { echo "You must set ARTIFACTS_PATH firstly."; return 1; } 
-(source PKGBUILD
-[ -n "${makedepends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]}
+[ -n "${ARTIFACTS_PATH}" ] || { echo "You must set ARTIFACTS_PATH firstly."; return 1; }
+
+_package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}}
+
 [ -n "${depends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${depends[@]}
-)
+[ -n "$(eval echo \${depends_${PACMAN_ARCH}})" ] && eval pacman -S --needed --noconfirm --disable-download-timeout \${depends_${PACMAN_ARCH}[@]}
+[ -n "${makedepends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]}
+[ -n "$(eval echo \${makedepends_${PACMAN_ARCH}})" ] && eval pacman -S --needed --noconfirm --disable-download-timeout \${makedepends_${PACMAN_ARCH}[@]}
+
 runuser -u alarm -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --rmdeps --cleanbuild
 
 (ls *.pkg.tar.xz &>/dev/null) && {
@@ -125,7 +142,7 @@ deploy_artifacts()
 {
 [ -n "${DEPLOY_PATH}" ] || { echo "You must set DEPLOY_PATH firstly."; return 1; } 
 local old_pkgs pkg file
-(ls ${ARTIFACTS_PATH}/*.pkg.tar.xz &>/dev/null) || { echo "Skiped, no file to deploy"; exit 0; }
+(ls ${ARTIFACTS_PATH}/*.pkg.tar.xz &>/dev/null) || { echo "Skiped, no file to deploy"; return 0; }
 pushd ${ARTIFACTS_PATH}
 echo ::set-output name=pkgfile0::$(ls *.pkg.tar.xz)
 for file in ${PACMAN_REPO}.{db,files}{,.tar.xz}{,.old}; do
