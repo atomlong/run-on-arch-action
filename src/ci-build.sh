@@ -83,7 +83,7 @@ local pkg
 # signature for distrib packages.
 [ -d ${ARTIFACTS_PATH} ] && {
 pushd ${ARTIFACTS_PATH}
-for pkg in *.pkg.tar.xz; do
+for pkg in *${PKGEXT}; do
 expect << _EOF
 spawn gpg --pinentry-mode loopback -o "${pkg}.sig" -b "${pkg}"
 expect {
@@ -121,8 +121,11 @@ _EOF
 build_package()
 {
 [ -n "${ARTIFACTS_PATH}" ] || { echo "You must set ARTIFACTS_PATH firstly."; return 1; }
-
-_package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}}
+local pkgname item
+unset PKGEXT
+_package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}} pkgname PKGEXT
+[ -n "${PKGEXT}" ] || PKGEXT=$(grep -Po "^PKGEXT=('|\")?\K[^'\"]+" /etc/makepkg.conf)
+export PKGEXT=${PKGEXT}
 
 [ -n "${depends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${depends[@]}
 [ -n "$(eval echo \${depends_${PACMAN_ARCH}})" ] && eval pacman -S --needed --noconfirm --disable-download-timeout \${depends_${PACMAN_ARCH}[@]}
@@ -131,10 +134,16 @@ _package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}}
 
 runuser -u alarm -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --rmdeps --cleanbuild
 
-(ls *.pkg.tar.xz &>/dev/null) && {
+(ls *${PKGEXT} &>/dev/null) && {
 mkdir -pv ${ARTIFACTS_PATH}
-mv -vf *.pkg.tar.xz ${ARTIFACTS_PATH}
+mv -vf *${PKGEXT} ${ARTIFACTS_PATH}
+true
+} || {
+for item in ${pkgname[@]}; do
+export FILED_PKGS=(${FILED_PKGS[@]} ${PACMAN_REPO}/${item})
+done
 }
+
 }
 
 # deploy artifacts
@@ -142,21 +151,50 @@ deploy_artifacts()
 {
 [ -n "${DEPLOY_PATH}" ] || { echo "You must set DEPLOY_PATH firstly."; return 1; } 
 local old_pkgs pkg file
-(ls ${ARTIFACTS_PATH}/*.pkg.tar.xz &>/dev/null) || { echo "Skiped, no file to deploy"; return 0; }
+(ls ${ARTIFACTS_PATH}/*${PKGEXT} &>/dev/null) || { echo "Skiped, no file to deploy"; return 0; }
 pushd ${ARTIFACTS_PATH}
-echo ::set-output name=pkgfile0::$(ls *.pkg.tar.xz)
+export PKG_FILES=(${PKG_FILES[@]} $(ls *${PKGEXT}))
 for file in ${PACMAN_REPO}.{db,files}{,.tar.xz}{,.old}; do
 rclone copy ${DEPLOY_PATH}/${file} ${PWD} 2>/dev/null || true
 done
-old_pkgs=($(repo-add "${PACMAN_REPO}.db.tar.xz" *.pkg.tar.xz | tee /dev/stderr | grep -Po "\bRemoving existing entry '\K[^']+(?=')"))
+old_pkgs=($(repo-add "${PACMAN_REPO}.db.tar.xz" *${PKGEXT} | tee /dev/stderr | grep -Po "\bRemoving existing entry '\K[^']+(?=')"))
 popd
 for pkg in ${old_pkgs[@]}; do
-for file in ${pkg}-{${PACMAN_ARCH},any}.pkg.tar.xz{,.sig}; do
+for file in ${pkg}-{${PACMAN_ARCH},any}.pkg.tar.{xz,zst}{,.sig}; do
 rclone delete ${DEPLOY_PATH}/${file} 2>/dev/null || true
 done
 done
 rclone copy ${ARTIFACTS_PATH} ${DEPLOY_PATH} --copy-links
 }
+
+# create mail message
+create_mail_message()
+{
+local message item
+
+[ -n "${PKG_FILES}" ] && {
+message="<p>Successfully created the following package archive.</p>"
+for item in ${PKG_FILES[@]}; do
+message=${message}"<p><font color=\"green\">${item}</font></p>"
+done
+}
+
+[ -n "${FILED_PKGS}" ] && {
+message=${message}"<p>Failed to build following packages. </p>"
+for item in ${FILED_PKGS[@]}; do
+message=${message}"<p><font color=\"red\">${item}</font></p>"
+done
+}
+
+[ -n "${message}" ] && {
+message=${message}"<p>Architecture: ${PACMAN_ARCH}</p>"
+message=${message}"<p>Build Number: ${CI_BUILD_NUMBER}</p>"
+echo ::set-output name=message::${message}
+}
+
+return 0
+}
+
 
 # Run from here
 cd ${GITHUB_WORKSPACE}
@@ -183,4 +221,5 @@ execute 'Building packages' build_package
 execute "Generating package signature" create_package_signature
 success 'All packages built successfully'
 execute "Deploying artifacts" deploy_artifacts
+create_mail_message
 success 'All artifacts have been deployed successfully'
