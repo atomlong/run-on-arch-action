@@ -65,6 +65,7 @@ local repo name
 for repo in ${repos[@]}; do
 name=$(sed -n -r 's/\[(\w+)\].*/\1/p' <<< ${repo})
 [ -n "${name}" ] || continue
+[ -z $(sed -rn "/^\\[${name}]\s*$/p" /etc/pacman.conf) ] || continue
 cp -vf /etc/pacman.conf{,.orig}
 sed -r 's/]/&\nServer = /' <<< ${repo} >> /etc/pacman.conf
 sed -i -r 's/^(SigLevel\s*=\s*).*/\1Never/' /etc/pacman.conf
@@ -81,19 +82,10 @@ create_package_signature()
 local pkg
 
 # signature for distrib packages.
-[ -d ${ARTIFACTS_PATH} ] && {
+(ls ${ARTIFACTS_PATH}/*${PKGEXT} &>/dev/null) && {
 pushd ${ARTIFACTS_PATH}
 for pkg in *${PKGEXT}; do
-expect << _EOF
-spawn gpg --pinentry-mode loopback -o "${pkg}.sig" -b "${pkg}"
-expect {
-"Enter passphrase:" {
-					send "${PGP_KEY_PASSWD}\r"
-					exp_continue
-					}
-EOF { }
-}
-_EOF
+gpg --pinentry-mode loopback --passphrase "${PGP_KEY_PASSWD}" -o "${pkg}.sig" -b "${pkg}"
 done
 popd
 }
@@ -105,34 +97,25 @@ import_pgp_seckey()
 {
 [ -n "${PGP_KEY_PASSWD}" ] || { echo "You must set PGP_KEY_PASSWD firstly."; return 1; } 
 [ -n "${PGP_KEY}" ] || { echo "You must set PGP_KEY firstly."; return 1; }
-expect << _EOF
-spawn bash -c "gpg --import --pinentry-mode loopback <<< '${PGP_KEY}'"
-expect {
-"Enter passphrase:" {
-					send "${PGP_KEY_PASSWD}\r"
-					exp_continue
-					}
-EOF { }
-}
-_EOF
+gpg --import --pinentry-mode loopback --passphrase "${PGP_KEY_PASSWD}" <<< "${PGP_KEY}"
 }
 
 # Build package
 build_package()
 {
 [ -n "${ARTIFACTS_PATH}" ] || { echo "You must set ARTIFACTS_PATH firstly."; return 1; }
-local pkgname item
+local pkgname item ret=0
 unset PKGEXT
 _package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}} pkgname PKGEXT
 [ -n "${PKGEXT}" ] || PKGEXT=$(grep -Po "^PKGEXT=('|\")?\K[^'\"]+" /etc/makepkg.conf)
 export PKGEXT=${PKGEXT}
 
-[ -n "${depends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${depends[@]}
-[ -n "$(eval echo \${depends_${PACMAN_ARCH}})" ] && eval pacman -S --needed --noconfirm --disable-download-timeout \${depends_${PACMAN_ARCH}[@]}
-[ -n "${makedepends}" ] && pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]}
-[ -n "$(eval echo \${makedepends_${PACMAN_ARCH}})" ] && eval pacman -S --needed --noconfirm --disable-download-timeout \${makedepends_${PACMAN_ARCH}[@]}
+[ ${ret} == 0 ] && [ -n "${depends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${depends[@]} || ret=1; }
+[ ${ret} == 0 ] && [ -n "$(eval echo \${depends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${depends_${PACMAN_ARCH}[@]} || ret=1; }
+[ ${ret} == 0 ] && [ -n "${makedepends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]} || ret=1; }
+[ ${ret} == 0 ] && [ -n "$(eval echo \${makedepends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${makedepends_${PACMAN_ARCH}[@]} || ret=1; }
 
-runuser -u alarm -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --rmdeps --cleanbuild
+[ ${ret} == 0 ] && runuser -u alarm -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --nodeps --cleanbuild
 
 (ls *${PKGEXT} &>/dev/null) && {
 mkdir -pv ${ARTIFACTS_PATH}
@@ -143,7 +126,7 @@ for item in ${pkgname[@]}; do
 export FILED_PKGS=(${FILED_PKGS[@]} ${PACMAN_REPO}/${item})
 done
 }
-
+return ${ret}
 }
 
 # deploy artifacts
@@ -195,7 +178,6 @@ echo ::set-output name=message::${message}
 return 0
 }
 
-
 # Run from here
 cd ${GITHUB_WORKSPACE}
 message 'Install build environment.'
@@ -207,13 +189,25 @@ message 'Install build environment.'
 [ -z "${RCLONE_CONF}" ] && { echo "Environment variable 'RCLONE_CONF' is required."; exit 1; }
 [ -z "${PGP_KEY_PASSWD}" ] && { echo "Environment variable 'PGP_KEY_PASSWD' is required."; exit 1; }
 [ -z "${PGP_KEY}" ] && { echo "Environment variable 'PGP_KEY' is required."; exit 1; }
-[ -z "${CUSTOM_REPOS}" ] || add_custom_repos
-pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone expect
+[ -z "${CUSTOM_REPOS}" ] || {
+CUSTOM_REPOS=$(sed -e 's/$arch\b/\\$arch/g' -e 's/$repo\b/\\$repo/g' <<< ${CUSTOM_REPOS})
+[[ ${CUSTOM_REPOS} =~ '$' ]] && eval export CUSTOM_REPOS=${CUSTOM_REPOS}
+add_custom_repos
+}
+
+pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone git
+[ -f /etc/default/useradd ] && {
+DEFAULT_GROUP=$(grep -Po "^GROUP=\K\S+" /etc/default/useradd)
+grep -Pq "^${DEFAULT_GROUP}:" /etc/group || groupadd "${DEFAULT_GROUP}"
+}
 grep -Pq "^alarm:" /etc/group || groupadd "alarm"
 grep -Pq "^alarm:" /etc/passwd || useradd -m "alarm" -s "/bin/bash" -g "alarm"
 chown -R alarm:alarm ${GITHUB_WORKSPACE}
-mkdir -pv ${HOME}/.config/rclone
-printf "${RCLONE_CONF}" > ${HOME}/.config/rclone/rclone.conf
+RCLONE_CONFIG_PATH=$(rclone config file | tail -n1)
+mkdir -pv $(dirname ${RCLONE_CONFIG_PATH})
+[ $(awk 'END{print NR}' <<< "${RCLONE_CONF}") == 1 ] &&
+base64 --decode <<< "${RCLONE_CONF}" > ${RCLONE_CONFIG_PATH} ||
+printf "${RCLONE_CONF}" > ${RCLONE_CONFIG_PATH}
 import_pgp_seckey
 success 'The build environment is ready successfully.'
 # Build
