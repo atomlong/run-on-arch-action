@@ -1,1 +1,1 @@
-FROM agners/archlinuxarm-arm64v8
+FROM lopsided/archlinux-arm64v8
