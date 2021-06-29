@@ -200,9 +200,13 @@ pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-tim
 DEFAULT_GROUP=$(grep -Po "^GROUP=\K\S+" /etc/default/useradd)
 grep -Pq "^${DEFAULT_GROUP}:" /etc/group || groupadd "${DEFAULT_GROUP}"
 }
-grep -Pq "^alarm:" /etc/group || groupadd "alarm"
-grep -Pq "^alarm:" /etc/passwd || useradd -m "alarm" -s "/bin/bash" -g "alarm"
+
+getent group alarm &>/dev/null || groupadd alarm
+getent passwd alarm &>/dev/null || useradd -m alarm -s "/bin/bash" -g "alarm"
 chown -R alarm:alarm ${GITHUB_WORKSPACE}
+getent group http &>/dev/null || groupadd -g 33 http
+getent passwd http &>/dev/null || useradd -m -u 33 http -s "/usr/bin/nologin" -g "http" -d "/srv/http"
+
 RCLONE_CONFIG_PATH=$(rclone config file | tail -n1)
 mkdir -pv $(dirname ${RCLONE_CONFIG_PATH})
 [ $(awk 'END{print NR}' <<< "${RCLONE_CONF}") == 1 ] &&
