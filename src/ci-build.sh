@@ -37,6 +37,22 @@ _package_info() {
     done
 }
 
+# record current commit hash of one package
+_record_package_hash()
+{
+local package="${1}"
+local marker="build.marker"
+local commit_sha
+
+commit_sha="$(git log --pretty=format:'%H' -1)"
+rclone copy "${DEPLOY_PATH%/*}/${marker}" . &>/dev/null || touch "${marker}"
+grep -Pq "\[[[:xdigit:]]+\]${package}" ${marker} && \
+sed -i -r "s|^(\[)[[:xdigit:]]+(\]${package}\s*)$|\1${commit_sha}\2|g" "${marker}" || \
+echo "[${commit_sha}]${package}" >> "${marker}"
+rclone move "${marker}" "${DEPLOY_PATH%/*}"
+return 0
+}
+
 # Run command with status
 execute(){
     local status="${1}"
@@ -148,6 +164,7 @@ rclone delete ${DEPLOY_PATH}/${file} 2>/dev/null || true
 done
 done
 rclone copy ${ARTIFACTS_PATH} ${DEPLOY_PATH} --copy-links
+_record_package_hash ${PACMAN_REPO}/${CI_REPO#*/}
 }
 
 # create mail message
@@ -179,7 +196,7 @@ return 0
 }
 
 # Run from here
-cd ${GITHUB_WORKSPACE}
+cd ${CI_BUILD_DIR}
 message 'Install build environment.'
 [ -z "${PACMAN_ARCH}" ] && export PACMAN_ARCH=$(sed -nr 's|^CARCH=\"(\w+).*|\1|p' /etc/makepkg.conf)
 [ -z "${ARTIFACTS_PATH}" ] && export ARTIFACTS_PATH=artifacts/${PACMAN_ARCH}/${PACMAN_REPO}
@@ -203,7 +220,7 @@ grep -Pq "^${DEFAULT_GROUP}:" /etc/group || groupadd "${DEFAULT_GROUP}"
 
 getent group alarm &>/dev/null || groupadd alarm
 getent passwd alarm &>/dev/null || useradd -m alarm -s "/bin/bash" -g "alarm"
-chown -R alarm:alarm ${GITHUB_WORKSPACE}
+chown -R alarm:alarm ${CI_BUILD_DIR}
 getent group http &>/dev/null || groupadd -g 33 http
 getent passwd http &>/dev/null || useradd -m -u 33 http -s "/usr/bin/nologin" -g "http" -d "/srv/http"
 
