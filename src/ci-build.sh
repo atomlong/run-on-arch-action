@@ -30,10 +30,10 @@ _package_info() {
     local properties=("${@}")
     for property in "${properties[@]}"; do
         local -n nameref_property="${property}"
-        nameref_property=($(
+        eval nameref_property=($(
             source PKGBUILD
             declare -n nameref_property="${property}"
-            echo "${nameref_property[@]}"))
+			printf "\"%s\" " "${nameref_property[@]}"))
     done
 }
 
@@ -46,7 +46,7 @@ local commit_sha
 
 commit_sha="$(git log --pretty=format:'%H' -1)"
 rclone copy "${DEPLOY_PATH%/*}/${marker}" . &>/dev/null || touch "${marker}"
-grep -Pq "\[[[:xdigit:]]+\]${package}" ${marker} && \
+grep -Pq "^\s*\[[[:xdigit:]]+\]${package}\s*$" ${marker} && \
 sed -i -r "s|^(\[)[[:xdigit:]]+(\]${package}\s*)$|\1${commit_sha}\2|g" "${marker}" || \
 echo "[${commit_sha}]${package}" >> "${marker}"
 rclone move "${marker}" "${DEPLOY_PATH%/*}"
@@ -81,7 +81,7 @@ local repo name
 for repo in ${repos[@]}; do
 name=$(sed -n -r 's/\[(\w+)\].*/\1/p' <<< ${repo})
 [ -n "${name}" ] || continue
-[ -z $(sed -rn "/^\\[${name}]\s*$/p" /etc/pacman.conf) ] || continue
+[ -z $(sed -rn "/^\[${name}]\s*$/p" /etc/pacman.conf) ] || continue
 cp -vf /etc/pacman.conf{,.orig}
 sed -r 's/]/&\nServer = /' <<< ${repo} >> /etc/pacman.conf
 sed -i -r 's/^(SigLevel\s*=\s*).*/\1Never/' /etc/pacman.conf
@@ -89,6 +89,14 @@ pacman --sync --refresh --needed --noconfirm --disable-download-timeout ${name}-
 mv -vf /etc/pacman.conf{.orig,}
 sed -r "s/]/&\n${name}Server = /" <<< ${repo} >> /etc/pacman.conf
 done
+}
+
+# Enable multilib repository
+enable_multilib_repo()
+{
+[ "${PACMAN_ARCH}" == "x86_64" ] || [ "${PACMAN_ARCH}" == "i686" ] || return 0
+[ -z $(sed -rn "/^\[multilib]\s*$/p" /etc/pacman.conf) ] || return 0
+printf "[multilib]\nInclude = /etc/pacman.d/mirrorlist\n"  >> /etc/pacman.conf
 }
 
 # Function: Sign one or more pkgballs.
@@ -122,7 +130,7 @@ build_package()
 [ -n "${ARTIFACTS_PATH}" ] || { echo "You must set ARTIFACTS_PATH firstly."; return 1; }
 local pkgname item ret=0
 unset PKGEXT
-_package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}} pkgname PKGEXT
+_package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}} optdepends{,_${PACMAN_ARCH}} pkgname PKGEXT arch
 [ -n "${PKGEXT}" ] || PKGEXT=$(grep -Po "^PKGEXT=('|\")?\K[^'\"]+" /etc/makepkg.conf)
 export PKGEXT=${PKGEXT}
 
@@ -130,6 +138,17 @@ export PKGEXT=${PKGEXT}
 [ ${ret} == 0 ] && [ -n "$(eval echo \${depends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${depends_${PACMAN_ARCH}[@]} || ret=1; }
 [ ${ret} == 0 ] && [ -n "${makedepends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]} || ret=1; }
 [ ${ret} == 0 ] && [ -n "$(eval echo \${makedepends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${makedepends_${PACMAN_ARCH}[@]} || ret=1; }
+[ ${ret} == 0 ] && [ -n "${optdepends}" ] && {
+optdepends=($(for ((i=0; i<${#optdepends[@]}; i++)); do grep -Po '^[^:]+' <<< "${optdepends[i]}"; done))
+pacman -S --needed --noconfirm --disable-download-timeout ${optdepends[@]} || ret=1
+}
+[ ${ret} == 0 ] && [ -n "$(eval echo \${optdepends_${PACMAN_ARCH}})" ] && {
+eval optdepends_${PACMAN_ARCH}="(\$(for ((i=0; i<\${#optdepends_${PACMAN_ARCH}[@]}; i++)); do grep -Po '^[^:]+' <<< \"\${optdepends[i]}\"; done))"
+eval pacman -S --needed --noconfirm --disable-download-timeout \${optdepends_${PACMAN_ARCH}[@]} || ret=1
+}
+[ ${ret} == 0 ] && [ -n "${optdepends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${optdepends[@]} || ret=1; }
+[ ${ret} == 0 ] && [ -n "$(eval echo \${optdepends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${optdepends_${PACMAN_ARCH}[@]} || ret=1; }
+[ ${ret} == 0 ] && { [ "${arch}" == any ] || grep -Pwq "${PACMAN_ARCH}" <<< ${arch[@]} || sed -i -r "s|^(arch=[^)]+)(\))|\1 ${PACMAN_ARCH}\2|" PKGBUILD; }
 
 [ ${ret} == 0 ] && runuser -u alarm -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --nodeps --cleanbuild
 
@@ -211,6 +230,7 @@ CUSTOM_REPOS=$(sed -e 's/$arch\b/\\$arch/g' -e 's/$repo\b/\\$repo/g' <<< ${CUSTO
 [[ ${CUSTOM_REPOS} =~ '$' ]] && eval export CUSTOM_REPOS=${CUSTOM_REPOS}
 add_custom_repos
 }
+enable_multilib_repo
 
 pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone git
 [ -f /etc/default/useradd ] && {
