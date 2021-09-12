@@ -11,7 +11,7 @@ declare -a DOCKER_RUN_ARGS=${@:3:${#@}}
 # Defaults
 ACTION_DIR="$(cd "$(dirname "$0")"/.. >/dev/null 2>&1 ; pwd -P)"
 LOWERCASE_REPOSITORY=$(printf "%s" "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
-PACKAGE_REGISTRY="docker.pkg.github.com/${LOWERCASE_REPOSITORY}/${CONTAINER_NAME}"
+PACKAGE_REGISTRY="ghcr.io/${LOWERCASE_REPOSITORY}/${CONTAINER_NAME}"
 DEBIAN_FRONTEND=noninteractive
 
 show_build_log_and_exit () {
@@ -62,7 +62,7 @@ build_container () {
     # Login without echoing token, just in case
     BASH_FLAGS="$-"
     set +x
-    echo "$GITHUB_TOKEN" | docker login docker.pkg.github.com \
+    echo "$GITHUB_TOKEN" | docker login ghcr.io \
       -u "$GITHUB_ACTOR" \
       --password-stdin
     set "$BASH_FLAGS"
@@ -101,32 +101,29 @@ run_container () {
     --rm \
     -e DEBIAN_FRONTEND=noninteractive \
     -e CI \
-    -e GITHUB_WORKFLOW \
-    -e GITHUB_RUN_ID \
-    -e GITHUB_RUN_NUMBER \
     -e GITHUB_ACTION \
+    -e GITHUB_ACTION_PATH \
     -e GITHUB_ACTIONS \
     -e GITHUB_ACTOR \
-    -e GITHUB_REPOSITORY \
-    -e GITHUB_EVENT_NAME \
-    -e GITHUB_EVENT_PATH \
-    -e GITHUB_WORKSPACE \
-    -e GITHUB_SHA \
-    -e GITHUB_REF \
-    -e GITHUB_HEAD_REF \
-    -e GITHUB_BASE_REF \
-    -e GITHUB_SERVER_URL \
     -e GITHUB_API_URL \
-    -e GITHUB_GRAPHQL_URL \
-    -e GITHUB_REF \
-    -e GITHUB_SHA \
-    -e GITHUB_HEAD_REF \
     -e GITHUB_BASE_REF \
+    -e GITHUB_ENV \
     -e GITHUB_EVENT_NAME \
-    -e GITHUB_WORKSPACE \
     -e GITHUB_EVENT_PATH \
-    -e RUNNER_TOOL_CACHE \
+    -e GITHUB_GRAPHQL_URL \
+    -e GITHUB_HEAD_REF \
+    -e GITHUB_JOB \
+    -e GITHUB_REF \
+    -e GITHUB_REPOSITORY \
+    -e GITHUB_RUN_ID \
+    -e GITHUB_RUN_NUMBER \
+    -e GITHUB_SERVER_URL \
+    -e GITHUB_SHA \
+    -e GITHUB_WORKFLOW \
+    -e GITHUB_WORKSPACE \
+    -e RUNNER_OS \
     -e RUNNER_TEMP \
+    -e RUNNER_TOOL_CACHE \
     -e RUNNER_WORKSPACE \
     -v "/var/run/docker.sock:/var/run/docker.sock" \
     -v "${EVENT_DIR}:${EVENT_DIR}" \
