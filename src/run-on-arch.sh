@@ -97,6 +97,7 @@ run_container () {
   EVENT_DIR=$(dirname "$GITHUB_EVENT_PATH")
 
   docker run \
+    --privileged \
     --workdir "${GITHUB_WORKSPACE}" \
     --rm \
     -e DEBIAN_FRONTEND=noninteractive \
