@@ -53,6 +53,54 @@ rclone move "${marker}" "${DEPLOY_PATH%/*}"
 return 0
 }
 
+# Lock the remote file to prevent it from being modified by another instance.
+_lock_file()
+{
+local lockfile=${1}.lck
+local instid=$$
+local t_s last_s head_s
+[ "${CI}" == "true" ] && instid="${CI_REPO}:${CI_BUILD_NUMBER}"
+rclone lsf ${lockfile} &>/dev/null && rclone copyto ${lockfile} lockfile.lck
+echo "${instid}" >> lockfile.lck
+sed -i '/^\s*$/d' lockfile.lck
+rclone moveto lockfile.lck ${lockfile}
+
+t_s=0
+last_s=""
+while true; do
+head_s="$(rclone cat ${lockfile} 2>/dev/null | head -n 1)"
+[ -z "${head_s}" ] && continue
+[ "${head_s}" == "${instid}" ] && break
+[ "${head_s}" == "${last_s}" ] && {
+(( ($(date '+%s') - ${t_s}) > (30*60) )) && {
+rclone cat ${lockfile} | awk "BEGIN {P=0} {if (\$1 != \"${head_s}\") P=1; if (P == 1 && NF) print}" > lockfile.lck
+sed -i '/^\s*$/d' lockfile.lck
+[ -s lockfile.lck ] && rclone moveto lockfile.lck ${lockfile} || {
+rclone deletefile ${lockfile}
+break
+}
+}
+} || {
+t_s=$(date '+%s')
+last_s="${head_s}"
+}
+done
+return 0
+}
+
+# Release the remote file to allow it to be modified by another instance.
+_release_file()
+{
+local lockfile=${1}.lck
+local instid=$$
+[ "${CI}" == "true" ] && instid="${CI_REPO}:${CI_BUILD_NUMBER}"
+rclone lsf ${lockfile} &>/dev/null || return 0
+rclone cat ${lockfile} | awk "BEGIN {P=0} {if (\$1 != \"${instid}\") P=1; if (P == 1 && NF) print}" > lockfile.lck
+[ -s lockfile.lck ] && rclone moveto lockfile.lck ${lockfile} || rclone deletefile ${lockfile}
+rm -vf lockfile.lck
+return 0
+}
+
 # Run command with status
 execute(){
     local status="${1}"
@@ -77,7 +125,7 @@ add_custom_repos()
 {
 [ -n "${CUSTOM_REPOS}" ] || { echo "You must set CUSTOM_REPOS firstly."; return 1; }
 local repos=(${CUSTOM_REPOS//,/ })
-local repo name
+local repo name err i
 for repo in ${repos[@]}; do
 name=$(sed -n -r 's/\[(\w+)\].*/\1/p' <<< ${repo})
 [ -n "${name}" ] || continue
@@ -85,7 +133,15 @@ name=$(sed -n -r 's/\[(\w+)\].*/\1/p' <<< ${repo})
 cp -vf /etc/pacman.conf{,.orig}
 sed -r 's/]/&\nServer = /' <<< ${repo} >> /etc/pacman.conf
 sed -i -r 's/^(SigLevel\s*=\s*).*/\1Never/' /etc/pacman.conf
-pacman --sync --refresh --needed --noconfirm --disable-download-timeout ${name}-keyring && name="" || name="SigLevel = Never\n"
+for ((i=0; i<5; i++)); do
+err=$(
+LANG=en_US.UTF-8 pacman --sync --refresh --needed --noconfirm --disable-download-timeout ${name}-keyring 2>&1 | tee /dev/stderr | sed -n "/error: target not found: ${name}-keyring/p"
+exit ${PIPESTATUS}
+)
+[ $? == 0 ] && break
+[ -n "${err}" ] && break
+done
+[ -z "${err}" ] && name="" || name="SigLevel = Never\n"
 mv -vf /etc/pacman.conf{.orig,}
 sed -r "s/]/&\n${name}Server = /" <<< ${repo} >> /etc/pacman.conf
 done
@@ -97,6 +153,24 @@ enable_multilib_repo()
 [ "${PACMAN_ARCH}" == "x86_64" ] || [ "${PACMAN_ARCH}" == "i686" ] || return 0
 [ -z $(sed -rn "/^\[multilib]\s*$/p" /etc/pacman.conf) ] || return 0
 printf "[multilib]\nInclude = /etc/pacman.d/mirrorlist\n"  >> /etc/pacman.conf
+}
+
+# Add old packages repository
+add_archive_repo()
+{
+[ "${PACMAN_ARCH}" == "x86_64" ] || [ "${PACMAN_ARCH}" == "i686" ] || return 0
+local archive_repo='https://archive.archlinux.org/repos/month/$repo/os/$arch'
+local archive_repo_sed archive_repo_sed_date
+local i d
+
+for ((i=1; i<=365; i++)); do
+d=$(date -d "-${i} day" '+%Y/%m/%d')
+archive_repo_sed_date=$(sed "s|month|${d}|" <<< "${archive_repo}")
+archive_repo_sed="${archive_repo_sed_date//\//\\/}"
+archive_repo_sed=${archive_repo_sed//$/\\$}
+[ -z $(sed -rn "/^Server = ${archive_repo_sed}/p" /etc/pacman.d/mirrorlist) ] && \
+printf "Server = ${archive_repo_sed_date}\n" >> /etc/pacman.d/mirrorlist
+done
 }
 
 # Function: Sign one or more pkgballs.
@@ -170,6 +244,10 @@ deploy_artifacts()
 [ -n "${DEPLOY_PATH}" ] || { echo "You must set DEPLOY_PATH firstly."; return 1; } 
 local old_pkgs pkg file
 (ls ${ARTIFACTS_PATH}/*${PKGEXT} &>/dev/null) || { echo "Skiped, no file to deploy"; return 0; }
+
+_lock_file ${DEPLOY_PATH}/${PACMAN_REPO}.db
+
+echo "Adding package information to datdabase ..."
 pushd ${ARTIFACTS_PATH}
 export PKG_FILES=(${PKG_FILES[@]} $(ls *${PKGEXT}))
 for file in ${PACMAN_REPO}.{db,files}{,.tar.xz}{,.old}; do
@@ -177,12 +255,18 @@ rclone copy ${DEPLOY_PATH}/${file} ${PWD} 2>/dev/null || true
 done
 old_pkgs=($(repo-add "${PACMAN_REPO}.db.tar.xz" *${PKGEXT} | tee /dev/stderr | grep -Po "\bRemoving existing entry '\K[^']+(?=')"))
 popd
+
+echo "Tring to delete old files on remote server ..."
 for pkg in ${old_pkgs[@]}; do
-for file in ${pkg}-{${PACMAN_ARCH},any}.pkg.tar.{xz,zst}{,.sig}; do
-rclone delete ${DEPLOY_PATH}/${file} 2>/dev/null || true
+for file in ${pkg}-{${PACMAN_ARCH},any}${PKGEXT}{,.sig}; do
+rclone deletefile ${DEPLOY_PATH}/${file} 2>/dev/null || true
 done
 done
+
+echo "Uploading new files to remote server ..."
 rclone copy ${ARTIFACTS_PATH} ${DEPLOY_PATH} --copy-links
+
+_release_file ${DEPLOY_PATH}/${PACMAN_REPO}.db
 _record_package_hash ${PACMAN_REPO}/${CI_REPO#*/}
 }
 
@@ -194,20 +278,22 @@ local message item
 [ -n "${PKG_FILES}" ] && {
 message="<p>Successfully created the following package archive.</p>"
 for item in ${PKG_FILES[@]}; do
-message=${message}"<p><font color=\"green\">${item}</font></p>"
+message+="<p><font color=\"green\">${item}</font></p>"
 done
 }
 
 [ -n "${FILED_PKGS}" ] && {
-message=${message}"<p>Failed to build following packages. </p>"
+message+="<p>Failed to build following packages. </p>"
 for item in ${FILED_PKGS[@]}; do
-message=${message}"<p><font color=\"red\">${item}</font></p>"
+message+="<p><font color=\"red\">${item}</font></p>"
 done
 }
 
+[ "${1}" ] && message+="<p>${1}<p>"
+
 [ -n "${message}" ] && {
-message=${message}"<p>Architecture: ${PACMAN_ARCH}</p>"
-message=${message}"<p>Build Number: ${CI_BUILD_NUMBER}</p>"
+message+="<p>Architecture: ${PACMAN_ARCH}</p>"
+message+="<p>Build Number: ${CI_BUILD_NUMBER}</p>"
 echo ::set-output name=message::${message}
 }
 
@@ -218,6 +304,7 @@ return 0
 cd ${CI_BUILD_DIR}
 message 'Install build environment.'
 [ -z "${PACMAN_ARCH}" ] && export PACMAN_ARCH=$(sed -nr 's|^CARCH=\"(\w+).*|\1|p' /etc/makepkg.conf)
+[ -z "${PACMAN_REPO}" ] && { echo "Environment variable 'PACMAN_REPO' is required."; exit 1; }
 [ -z "${ARTIFACTS_PATH}" ] && export ARTIFACTS_PATH=artifacts/${PACMAN_ARCH}/${PACMAN_REPO}
 [[ ${ARTIFACTS_PATH} =~ '$' ]] && eval export ARTIFACTS_PATH=${ARTIFACTS_PATH}
 [ -z "${DEPLOY_PATH}" ] && { echo "Environment variable 'DEPLOY_PATH' is required."; exit 1; }
@@ -231,8 +318,15 @@ CUSTOM_REPOS=$(sed -e 's/$arch\b/\\$arch/g' -e 's/$repo\b/\\$repo/g' <<< ${CUSTO
 add_custom_repos
 }
 enable_multilib_repo
+add_archive_repo
 
-pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone git
+for (( i=0; i<5; i++ )); do
+pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone git && break
+done || {
+create_mail_message "Failed to install build environment."
+failure "Cannot install all required packages."
+exit 1
+}
 [ -f /etc/default/useradd ] && {
 DEFAULT_GROUP=$(grep -Po "^GROUP=\K\S+" /etc/default/useradd)
 grep -Pq "^${DEFAULT_GROUP}:" /etc/group || groupadd "${DEFAULT_GROUP}"
@@ -250,6 +344,7 @@ mkdir -pv $(dirname ${RCLONE_CONFIG_PATH})
 base64 --decode <<< "${RCLONE_CONF}" > ${RCLONE_CONFIG_PATH} ||
 printf "${RCLONE_CONF}" > ${RCLONE_CONFIG_PATH}
 import_pgp_seckey
+trap "_release_file ${DEPLOY_PATH}/${PACMAN_REPO}.db" EXIT
 success 'The build environment is ready successfully.'
 # Build
 execute 'Building packages' build_package
