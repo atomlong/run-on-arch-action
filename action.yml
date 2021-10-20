@@ -46,11 +46,11 @@ inputs:
     default: ''
   pgpKey:
     description: 'PGP private key used to Sign alarm package.'
-    required: true
+    required: false
     default: ''
   pgpKeyPassword:
     description: 'The password of PGP private key.'
-    required: true
+    required: false
     default: ''
   deployPath:
     description: 'The path to deploy archlinuxarm package. such as onedrive:mirrors/archlinuxarm/aarch64/core'
@@ -58,7 +58,7 @@ inputs:
     default: ''
   pacmanRepo:
     description: 'The repository to which the current archlinuxarm package belongs, such as core,community,extra.'
-    required: true
+    required: false
     default: 'aur'
   customRepos:
     description: 'Custom package repositories to install packages via pacman, such as [aur]http://mirror.archlinuxarm.org/$arch/$repo. Use commas to separate multiple repositories.'

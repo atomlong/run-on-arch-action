@@ -66,8 +66,8 @@ async function main() {
 
   const githubToken = core.getInput('githubToken');
   const rcloneConfig = core.getInput('rcloneConfig', { required: true });
-  const pgpKey = core.getInput('pgpKey', { required: true });
-  const pgpKeyPassword = core.getInput('pgpKeyPassword', { required: true });
+  const pgpKey = core.getInput('pgpKey');
+  const pgpKeyPassword = core.getInput('pgpKeyPassword');
   const deployPath = core.getInput('deployPath', { required: true });
   const pacmanRepo = core.getInput('pacmanRepo');
   const customRepos = core.getInput('customRepos');
