@@ -60,7 +60,10 @@ local lockfile=${1}.lck
 local instid=$$
 local t_s last_s head_s
 [ "${CI}" == "true" ] && instid="${CI_REPO}:${CI_BUILD_NUMBER}"
-rclone lsf ${lockfile} &>/dev/null && rclone copyto ${lockfile} lockfile.lck
+last_s=$(rclone lsjson ${lockfile} 2>/dev/null | jq '.[0]|.ModTime' | tr -d '"')
+last_s=$([ -n "${last_s}" ] && date -d "${last_s}" "+%s" || echo 0)
+t_s=$(date '+%s')
+(( ${t_s}-${last_s} < 6*3600 )) && rclone copyto ${lockfile} lockfile.lck
 echo "${instid}" >> lockfile.lck
 sed -i '/^\s*$/d' lockfile.lck
 rclone moveto lockfile.lck ${lockfile}
@@ -158,14 +161,19 @@ printf "[multilib]\nInclude = /etc/pacman.d/mirrorlist\n"  >> /etc/pacman.conf
 # Add old packages repository
 add_archive_repo()
 {
-[ "${PACMAN_ARCH}" == "x86_64" ] || [ "${PACMAN_ARCH}" == "i686" ] || return 0
-local archive_repo='https://archive.archlinux.org/repos/month/$repo/os/$arch'
+local archive_repo
 local archive_repo_sed archive_repo_sed_date
 local i d
 
+case "${PACMAN_ARCH}" in
+	x86_64) archive_repo='https://archive.archlinux.org/repos/date/$repo/os/$arch' ;;
+	arm*|aarch64) archive_repo='http://tardis.tiny-vps.com/aarm/repos/date/$arch/$repo' ;;
+	*) return 0 ;;
+esac
+
 for ((i=1; i<=365; i++)); do
 d=$(date -d "-${i} day" '+%Y/%m/%d')
-archive_repo_sed_date=$(sed "s|month|${d}|" <<< "${archive_repo}")
+archive_repo_sed_date=$(sed "s|date|${d}|" <<< "${archive_repo}")
 archive_repo_sed="${archive_repo_sed_date//\//\\/}"
 archive_repo_sed=${archive_repo_sed//$/\\$}
 [ -z $(sed -rn "/^Server = ${archive_repo_sed}/p" /etc/pacman.d/mirrorlist) ] && \
@@ -321,7 +329,7 @@ enable_multilib_repo
 add_archive_repo
 
 for (( i=0; i<5; i++ )); do
-pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone git && break
+pacman --sync --refresh --sysupgrade --needed --noconfirm --disable-download-timeout base-devel rclone git jq && break
 done || {
 create_mail_message "Failed to install build environment."
 failure "Cannot install all required packages."
