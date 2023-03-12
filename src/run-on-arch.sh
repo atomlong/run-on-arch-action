@@ -37,7 +37,7 @@ install_deps () {
   #            linux/386, linux/arm/v7, linux/arm/v6
   sudo apt-get update -q -y
   sudo apt-get -qq install -y qemu qemu-user-static
-  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes --credential yes
 }
 
 build_container () {
@@ -140,5 +140,8 @@ run_container () {
 quiet rm -f build-log.txt
 quiet install_deps
 
+echo "::group::Build container"
 build_container
+
+echo "::group::Run container"
 run_container
