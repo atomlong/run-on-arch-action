@@ -114,6 +114,7 @@ run_container () {
     -e GITHUB_GRAPHQL_URL \
     -e GITHUB_HEAD_REF \
     -e GITHUB_JOB \
+    -e GITHUB_OUTPUT \
     -e GITHUB_REF \
     -e GITHUB_REPOSITORY \
     -e GITHUB_RUN_ID \
@@ -129,6 +130,7 @@ run_container () {
     -v "/var/run/docker.sock:/var/run/docker.sock" \
     -v "${EVENT_DIR}:${EVENT_DIR}" \
     -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" \
+    -v "${GITHUB_OUTPUT}:${GITHUB_OUTPUT}" \
     -v "${ACTION_DIR}:${ACTION_DIR}" \
     --tty \
     ${DOCKER_RUN_ARGS[@]} \

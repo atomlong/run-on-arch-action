@@ -302,7 +302,7 @@ done
 [ -n "${message}" ] && {
 message+="<p>Architecture: ${PACMAN_ARCH}</p>"
 message+="<p>Build Number: ${CI_BUILD_NUMBER}</p>"
-echo ::set-output name=message::${message}
+echo "message=${message}" >>${GITHUB_OUTPUT}
 }
 
 return 0
