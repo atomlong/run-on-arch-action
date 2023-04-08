@@ -37,19 +37,37 @@ _package_info() {
     done
 }
 
+# get last commit hash of one package
+_last_package_hash()
+{
+local package="${PACMAN_REPO}/${CI_REPO#*/}"
+local marker="build.marker"
+rclone cat "${DEPLOY_PATH}/${marker}" 2>/dev/null | sed -rn "s|^\[([[:xdigit:]]+)\]${package}\s*$|\1|p"
+return 0
+}
+
+# get current commit hash of one package
+_now_package_hash()
+{
+git log --pretty=format:'%H' -1 2>/dev/null
+return 0
+}
+
 # record current commit hash of one package
 _record_package_hash()
 {
-local package="${1}"
+local package="${PACMAN_REPO}/${CI_REPO#*/}"
 local marker="build.marker"
 local commit_sha
 
-commit_sha="$(git log --pretty=format:'%H' -1)"
-rclone copy "${DEPLOY_PATH%/*}/${marker}" . &>/dev/null || touch "${marker}"
-grep -Pq "^\s*\[[[:xdigit:]]+\]${package}\s*$" ${marker} && \
+_lock_file "${DEPLOY_PATH}/${marker}"
+commit_sha="$(_now_package_hash)"
+rclone lsf "${DEPLOY_PATH}/${marker}" &>/dev/null && while ! rclone copy "${DEPLOY_PATH}/${marker}" . &>/dev/null; do :; done || touch "${marker}"
+grep -Pq "\[[[:xdigit:]]+\]${package}\s*$" ${marker} && \
 sed -i -r "s|^(\[)[[:xdigit:]]+(\]${package}\s*)$|\1${commit_sha}\2|g" "${marker}" || \
 echo "[${commit_sha}]${package}" >> "${marker}"
-rclone move "${marker}" "${DEPLOY_PATH%/*}"
+rclone move "${marker}" "${DEPLOY_PATH}"
+_release_file "${DEPLOY_PATH}/${marker}"
 return 0
 }
 
@@ -210,15 +228,16 @@ gpg --import --pinentry-mode loopback --passphrase "${PGP_KEY_PASSWD}" <<< "${PG
 build_package()
 {
 [ -n "${ARTIFACTS_PATH}" ] || { echo "You must set ARTIFACTS_PATH firstly."; return 1; }
+[ "$(_last_package_hash)" == "$(_now_package_hash)" ] && { echo "The package '${PACMAN_REPO}/${CI_REPO#*/}' has beed built, skip."; return 0; }
 local pkgname item ret=0
 unset PKGEXT
 _package_info depends{,_${PACMAN_ARCH}} makedepends{,_${PACMAN_ARCH}} optdepends{,_${PACMAN_ARCH}} pkgname PKGEXT arch
 [ -n "${PKGEXT}" ] || PKGEXT=$(grep -Po "^PKGEXT=('|\")?\K[^'\"]+" /etc/makepkg.conf)
 export PKGEXT=${PKGEXT}
 
-[ ${ret} == 0 ] && [ -n "${depends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${depends[@]} || ret=1; }
+[ ${ret} == 0 ] && [ -n "${depends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${depends[@]} --overwrite '*' || ret=1; }
 [ ${ret} == 0 ] && [ -n "$(eval echo \${depends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${depends_${PACMAN_ARCH}[@]} || ret=1; }
-[ ${ret} == 0 ] && [ -n "${makedepends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]} || ret=1; }
+[ ${ret} == 0 ] && [ -n "${makedepends}" ] && { pacman -S --needed --noconfirm --disable-download-timeout ${makedepends[@]} --overwrite '*' || ret=1; }
 [ ${ret} == 0 ] && [ -n "$(eval echo \${makedepends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${makedepends_${PACMAN_ARCH}[@]} || ret=1; }
 [ ${ret} == 0 ] && [ -n "${optdepends}" ] && {
 optdepends=($(for ((i=0; i<${#optdepends[@]}; i++)); do grep -Po '^[^:]+' <<< "${optdepends[i]}"; done))
@@ -275,7 +294,7 @@ echo "Uploading new files to remote server ..."
 rclone copy ${ARTIFACTS_PATH} ${DEPLOY_PATH} --copy-links
 
 _release_file ${DEPLOY_PATH}/${PACMAN_REPO}.db
-_record_package_hash ${PACMAN_REPO}/${CI_REPO#*/}
+_record_package_hash
 }
 
 # create mail message
@@ -343,6 +362,7 @@ grep -Pq "^${DEFAULT_GROUP}:" /etc/group || groupadd "${DEFAULT_GROUP}"
 getent group alarm &>/dev/null || groupadd alarm
 getent passwd alarm &>/dev/null || useradd -m alarm -s "/bin/bash" -g "alarm"
 chown -R alarm:alarm ${CI_BUILD_DIR}
+git config --global --add safe.directory ${CI_BUILD_DIR}
 getent group http &>/dev/null || groupadd -g 33 http
 getent passwd http &>/dev/null || useradd -m -u 33 http -s "/usr/bin/nologin" -g "http" -d "/srv/http"
 
