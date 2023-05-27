@@ -49,7 +49,7 @@ return 0
 # get current commit hash of one package
 _now_package_hash()
 {
-git log --pretty=format:'%H' -1 2>/dev/null
+runuser -u ${username} -- git log --pretty=format:'%H' -1 2>/dev/null
 return 0
 }
 
@@ -251,7 +251,7 @@ eval pacman -S --needed --noconfirm --disable-download-timeout \${optdepends_${P
 [ ${ret} == 0 ] && [ -n "$(eval echo \${optdepends_${PACMAN_ARCH}})" ] && { eval pacman -S --needed --noconfirm --disable-download-timeout \${optdepends_${PACMAN_ARCH}[@]} || ret=1; }
 [ ${ret} == 0 ] && { [ "${arch}" == any ] || grep -Pwq "${PACMAN_ARCH}" <<< ${arch[@]} || sed -i -r "s|^(arch=[^)]+)(\))|\1 ${PACMAN_ARCH}\2|" PKGBUILD; }
 
-[ ${ret} == 0 ] && runuser -u alarm -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --nodeps --cleanbuild
+[ ${ret} == 0 ] && runuser -u ${username} -- makepkg --noconfirm --skippgpcheck --nocheck --syncdeps --nodeps --cleanbuild
 
 (ls *${PKGEXT} &>/dev/null) && {
 mkdir -pv ${ARTIFACTS_PATH}
@@ -359,10 +359,12 @@ DEFAULT_GROUP=$(grep -Po "^GROUP=\K\S+" /etc/default/useradd)
 grep -Pq "^${DEFAULT_GROUP}:" /etc/group || groupadd "${DEFAULT_GROUP}"
 }
 
-getent group alarm &>/dev/null || groupadd alarm
-getent passwd alarm &>/dev/null || useradd -m alarm -s "/bin/bash" -g "alarm"
-chown -R alarm:alarm ${CI_BUILD_DIR}
-git config --global --add safe.directory ${CI_BUILD_DIR}
+userid=$(stat -c "%u" ${CI_BUILD_DIR})
+groupid=$(stat -c "%g" ${CI_BUILD_DIR})
+username=git
+groupname=git
+getent group ${groupid} &>/dev/null || groupadd -g ${groupid} ${groupname}
+getent passwd ${userid} &>/dev/null || useradd -u ${userid} -m ${username} -s "/bin/bash" -g "${groupname}"
 getent group http &>/dev/null || groupadd -g 33 http
 getent passwd http &>/dev/null || useradd -m -u 33 http -s "/usr/bin/nologin" -g "http" -d "/srv/http"
 
